@@ -1,7 +1,12 @@
 package main
 
 import (
+	"context"
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -13,6 +18,8 @@ type Task struct {
 
 func (t Task) Do() {
 	time.Sleep(time.Second * 10)
+
+	log.Println("Task handled", time.Now().String())
 }
 
 func PostTaskToQueue(queue chan Task) http.HandlerFunc {
@@ -44,6 +51,26 @@ func main() {
 		go queueHandler(queue)
 	}
 
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
 	http.HandleFunc("/", PostTaskToQueue(queue))
-	http.ListenAndServe(":8080", nil)
+
+	srv := &http.Server{Addr: ":8080"}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			log.Fatalln("Http server error. ", err)
+		}
+	}()
+
+	log.Println("Signal for server shutdown detected: ", <-sigs)
+
+	if err := srv.Shutdown(context.TODO()); err != nil {
+		log.Println("server shoutdowning error")
+	}
+
+	close(queue)
+
+	log.Println("Server has been shutdown")
 }
